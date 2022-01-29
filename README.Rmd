@@ -1,0 +1,123 @@
+---
+title: "Sample code for extracting AEA RCT data"
+author: "Lars Vilhuber"
+date: '`r Sys.Date()`'
+output: github_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## Preliminaries
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+```{r knitr_options, echo=FALSE, results="hide"}
+options(width = 120)
+knitr::opts_chunk$set(results = "hold")
+```
+
+I used both the stable release on [CRAN](https://cran.r-project.org/package=dataverse), and installed the latest development version from [GitHub](https://github.com/iqss/dataverse-client-r/) (both as of `r Sys.Date()`). 
+
+```{r, eval = FALSE}
+# Install from CRAN
+install.packages("dataverse")
+
+# Install from GitHub
+# install.packages("remotes")
+remotes::install_github("iqss/dataverse-client-r")
+```
+
+See the documentation on how to record the `DATAVERSE_KEY`. You can set the API Token (or key) **when logged in** at [https://dataverse.harvard.edu/dataverseuser.xhtml?selectTab=apiTokenTab](https://dataverse.harvard.edu/dataverseuser.xhtml?selectTab=apiTokenTab).
+
+```{r knitr_options2, echo=TRUE, results="show"}
+Sys.setenv("DATAVERSE_SERVER" = "dataverse.harvard.edu")
+```
+
+I am using the Dataverse at **`r Sys.getenv("DATAVERSE_SERVER")`**. A key is included in the `.Renviron`, in the prescribed format:
+
+``` r
+DATAVERSE_KEY="examplekey12345"
+```
+
+## Finding the data
+
+```{r, eval = TRUE, echo = TRUE}
+library("dataverse")
+library("tidyverse")
+# we need the short name for the AEA RCT dataverse
+rct.repo.name <- "aearegistry"
+```
+
+Let's first get all the records:
+
+
+```{r, eval = TRUE, echo = TRUE}
+rct.dv <- get_dataverse(rct.repo.name)
+rct.dv.contents <- dataverse_contents(rct.dv)
+```
+
+The resulting data is a list of `r length(rct.dv.contents)` elements:
+
+```{r,  eval = TRUE, echo = FALSE}
+for (i in 1:3) { print(rct.dv.contents[[i]])}
+```
+
+We will get them all, read in the list of data files, and keep those that have "trials.csv" file (and for some earlier ones, a variation on that name):
+
+```{r, eval = TRUE, echo = TRUE}
+rct.files <- tibble()
+for (i in rct.dv.contents ) {
+  tmp <- as_tibble(get_dataset(i)$files) %>%
+    filter(originalFileFormat == "text/csv") %>%
+    filter(str_detect(originalFileName,"trials") | str_detect(originalFileName,"Registry_Trials"))
+  # for some reason, more recent deposits do not have the DOI in the files content
+  if ( tmp$pidURL == "" ) { tmp$pidURL <- as.character(i$persistentUrl)}
+  rct.files <- bind_rows(rct.files,tmp)
+}
+```
+
+with variable names
+
+```{r, eval = TRUE, echo = TRUE}
+names(rct.files)
+```
+
+and contents
+
+```{r, eval = TRUE, echo = TRUE}
+head(rct.files)
+```
+
+This is to ensure we don't keep any codebooks or auxiliary files.
+
+If we simply want to keep the latest, let's do so:
+
+```{r, eval = TRUE, echo = TRUE}
+rct.files %>% 
+  filter(creationDate == max(creationDate)) %>%
+  select(label,id,persistentId,pidURL,filename,originalFileName,creationDate) -> rct.latest
+```
+
+We should remember to keep track of when, since "latest" changes over time:
+
+- AEA Registry Data used here as of `r rct.latest$creationDate`
+- DOI `r rct.latest$pidURL`.
+
+We should also cite it appropriately (not done here).
+
+We could also use the `creationDate` or the name of the deposit to filter on a particular version (identified by a unique DOI). 
+
+## Loading the data
+
+We can now simply load the file by DOI or by `id`:
+
+```{r, eval = TRUE, echo = TRUE}
+rct.data.raw <- get_dataframe_by_id(fileid=rct.latest$id[1],.f = readr::read_csv,original = TRUE)
+
+head(rct.data.raw %>% select(RCT_ID,Title,`Last update date`))
+
+```
+
